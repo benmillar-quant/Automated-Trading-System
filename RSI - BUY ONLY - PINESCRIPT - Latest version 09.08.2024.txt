@@ -1,0 +1,160 @@
+//@version=5
+strategy("RSI Buy Only", overlay=true, calc_on_every_tick=true)
+
+// User-defined inputs
+rsi_period = input.int(21, title="RSI Period")
+overbought_level = input.float(50.5, title="Overbought Level")
+oversold_level = input.float(49.49, title="Oversold Level")
+spread = input.float(2.5, title="Spread")
+max_risk = input.float(80, title="Max Risk")
+stop_loss_to_BE = input.float(30, title="Stop Loss to BE") 
+
+// RSI calculation
+rsi_value = ta.rsi(close, rsi_period)
+
+// Unified trade variables
+var float entry_price = na
+var float stop_loss = na
+var float exit_price = na
+var float potential_pnl = na
+var bool below_oversold = false
+var bool stop_loss_to_be = false
+var int daily_losses = 0
+var bool order_placed = false
+var bool exit_order_placed = false
+var int bars_since_order = na
+
+// Time conditions
+in_trading_hours = (hour(time) == 8 and minute(time) >= 30) or (hour(time) > 8 and hour(time) < 15) or (hour(time) == 15 and minute(time) <= 57)
+
+// Reset flags if not within trading hours or at start of new day
+if not in_trading_hours or (hour(time) == 8 and minute(time) == 27)
+    below_oversold := false
+    daily_losses := 0
+    order_placed := false
+    exit_order_placed := false
+    bars_since_order := na
+
+// Trade signal detection and opening logic
+if in_trading_hours and daily_losses < 3
+    // Check for RSI below oversold
+    if barstate.isconfirmed and rsi_value <= oversold_level
+        below_oversold := true
+
+    // Trade opening logic based on confirmed bar close
+    if below_oversold and not strategy.opentrades 
+        // Check if RSI crosses above overbought level using ta.crossover
+        if barstate.isconfirmed and ta.crossover(rsi_value, overbought_level)
+            entry_price := high + spread
+            stop_loss := low - spread
+            risk = entry_price - stop_loss
+
+            // Check if risk is within max_risk limit
+            if risk <= max_risk
+                strategy.entry("Buy", strategy.long, stop=entry_price, comment="Buy @ " + str.tostring(entry_price))
+                order_placed := true
+                bars_since_order := 0  // Initialize bar counter
+                below_oversold := false // Reset condition
+                stop_loss_to_be := false
+            else
+                below_oversold := false // Reset if risk is too high and trade is not opened
+
+// Increment bar counter
+if order_placed
+    bars_since_order := nz(bars_since_order) + 1
+
+// Cancellation logic
+// Check if RSI returns to or below oversold level and cancel the order before it is opened
+if order_placed and barstate.isconfirmed and rsi_value <= oversold_level
+    strategy.cancel("Buy")
+    order_placed := false  // Reset the order placed flag
+    below_oversold := true  // Reset the below_oversold flag
+
+// Check if the order does not fill within the next 3 bars and cancel the order
+if order_placed and bars_since_order >= 4
+    strategy.cancel("Buy")
+    order_placed := false  // Reset the order placed flag
+    bars_since_order := na  // Reset the bar counter
+
+// New cancellation condition at 15:57
+if order_placed and (hour(time) == 15) and (minute(time) == 57)
+    strategy.cancel("Buy")
+    order_placed := false  // Reset the order placed flag
+    bars_since_order := na  // Reset the bar counter
+
+// Managing open trade
+if strategy.opentrades
+    below_oversold := false
+    // Exit for stop loss or breakeven
+    stop_loss_trigger = low <= stop_loss or (barstate.isconfirmed and low <= stop_loss)
+    if stop_loss_trigger
+        if stop_loss_to_be
+            strategy.exit("BE Exit", from_entry="Buy", stop=stop_loss, comment="BE @ " + str.tostring(stop_loss))
+        else
+            strategy.exit("SL Exit", from_entry="Buy", stop=stop_loss, comment="SL @ " + str.tostring(stop_loss))
+            daily_losses := daily_losses + 1
+        stop_loss_to_be := false
+        
+        // Reset flags after closing a trade
+        if barstate.isconfirmed
+            below_oversold := rsi_value <= oversold_level
+        else
+            below_oversold := false
+        
+        order_placed := false
+        exit_order_placed := false
+        bars_since_order := na
+
+    // Move stop loss to break-even
+    if high >= entry_price + stop_loss_to_BE
+        stop_loss := entry_price
+        stop_loss_to_be := true
+
+    // Check for take profit condition based on RSI crossing back to oversold
+    if barstate.isconfirmed and ta.crossunder(rsi_value, oversold_level)
+        exit_price := low - spread
+        potential_pnl := exit_price - entry_price
+        if potential_pnl >= 1
+            strategy.exit("Take Profit", from_entry="Buy", stop=exit_price, comment="TP @ " + str.tostring(exit_price))
+            exit_order_placed := true
+            stop_loss_to_be := false
+            below_oversold := true
+
+// Cancel the exit order if conditions change
+if exit_order_placed
+    // Cancel the exit order if RSI goes above the overbought level again
+    if barstate.isconfirmed and rsi_value >= overbought_level
+        strategy.cancel("Take Profit")
+        exit_order_placed := false
+
+// Close all trades at end of day (16:00)
+if strategy.opentrades and (hour(time) == 16) and (minute(time) == 00)
+    strategy.close_all(comment="EOD Close @ " + str.tostring(close))
+    below_oversold := false // Reset on day close
+    stop_loss_to_be := false
+    daily_losses := 0
+    order_placed := false
+    exit_order_placed := false
+    bars_since_order := na
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Close all trades on Friday at 15:45 ////////////////////////////////////////////////////////////////
+// if strategy.opentrades and (dayofweek(time) == dayofweek.friday) and (hour(time) == 15) and (minute(time) == 45)
+//     strategy.close_all(comment="Friday Close @ " + str.tostring(close))
+//     below_oversold := false // Reset on close
+//     stop_loss_to_be := false
+//     daily_losses := 0
+//     order_placed := false
+//     exit_order_placed := false
+//     bars_since_order := na
+
+
+// //////////////// HARD CLOSE ANY INCORRECT OPEN TRADES JUST ADJUST THE TIME \\\\\\\\\\\\\\\\\\
+// if strategy.opentrades and (hour(time) == 6) and (minute(time) == 19)
+//     strategy.close_all(comment="EOD Close @ " + str.tostring(close))
+//     below_oversold := false // Reset on day close
+//     stop_loss_to_be := false
+//     daily_losses := 0
+//     order_placed := false
+//     exit_order_placed := false
+//     bars_since_order := na

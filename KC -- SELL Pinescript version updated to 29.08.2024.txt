@@ -1,0 +1,120 @@
+//@version=5
+strategy("Keltner Channel Strategy", overlay=true, calc_on_every_tick=true)
+
+// User-defined inputs
+kc_length = input.int(13, title="KC Length")
+kc_mult = input.float(1.3, title="KC Multiplier")
+ma_type = input.string("EMA", title="Moving Average Type")
+spread = input.float(2.5, title="Spread")
+max_risk = input.float(80, title="Max Risk")
+stop_loss_to_BE = input.float(30, title="Stop Loss to BE")
+
+// Keltner Channel calculation
+ma = ta.ema(close, kc_length)
+kc_range = ta.atr(kc_length) * kc_mult
+upper_kc = ma + kc_range
+lower_kc = ma - kc_range
+
+// Plotting the Keltner Channel
+plot(upper_kc, color=color.red, linewidth=1)
+plot(ma, color=color.green, linewidth=1)
+plot(lower_kc, color=color.blue, linewidth=1)
+
+// Unified trade variables
+var float entry_price = na
+var float stop_loss = na
+var float exit_price = na
+var float potential_pnl = na
+var bool stop_loss_to_be = false
+var int daily_losses = 0
+var bool order_placed = false
+var bool exit_order_placed = false
+var int bars_since_order = na
+
+// Time conditions
+in_trading_hours = (hour(time) == 8 and minute(time) >= 30) or (hour(time) > 8 and hour(time) < 15) or (hour(time) == 15 and minute(time) <= 57)
+
+// Reset flags if not within trading hours or at start of new day
+if not in_trading_hours or (hour(time) == 8 and minute(time) == 27)
+    daily_losses := 0
+    order_placed := false
+    exit_order_placed := false
+    bars_since_order := na
+
+// Trade signal detection and opening logic for short trades
+if in_trading_hours and daily_losses < 3 and not strategy.opentrades
+    // Check for sell signal conditions
+    if barstate.isconfirmed and close < open and close <= upper_kc - 1
+        if high >= upper_kc + 1
+            // Calculate the risk
+            risk = (high + spread) - (low - spread)
+            if risk <= max_risk
+                entry_price := low - spread
+                stop_loss := high + spread
+                strategy.entry("Sell", strategy.short, stop=entry_price, comment="Sell @ " + str.tostring(entry_price))
+                order_placed := true
+                stop_loss_to_be := false
+                bars_since_order := 0  // Initialize bar counter
+
+// Increment bar counter
+if order_placed
+    bars_since_order := nz(bars_since_order) + 1
+
+// Additional cancellation logic
+// Cancel the order if a bar's close is higher than upper_kc + 1 before the order is filled
+if order_placed and close > upper_kc + 1
+    strategy.cancel("Sell")
+    order_placed := false  // Reset the order placed flag
+    bars_since_order := na  // Reset the bar counter
+
+// Other cancellation conditions
+if order_placed and bars_since_order >= 5
+    strategy.cancel("Sell")
+    order_placed := false  // Reset the order placed flag
+    bars_since_order := na  // Reset the bar counter
+
+// New cancellation condition at 15:57
+if order_placed and (hour(time) == 15) and (minute(time) == 57)
+    strategy.cancel("Sell")
+    order_placed := false  // Reset the order placed flag
+    bars_since_order := na  // Reset the bar counter
+
+// Managing open trade for short trades
+if strategy.opentrades
+    // Exit for stop loss or breakeven
+    stop_loss_trigger = high >= stop_loss or (barstate.isconfirmed and high >= stop_loss)
+    if stop_loss_trigger
+        if stop_loss_to_be
+            strategy.exit("BE Exit", from_entry="Sell", stop=stop_loss, comment="BE @ " + str.tostring(stop_loss))
+        else
+            strategy.exit("SL Exit", from_entry="Sell", stop=stop_loss, comment="SL @ " + str.tostring(stop_loss))
+            daily_losses := daily_losses + 1
+        stop_loss_to_be := false
+
+        // Reset flags after closing a trade
+        order_placed := false
+        exit_order_placed := false
+        bars_since_order := na
+
+    // Move stop loss to break-even
+    if low <= entry_price - stop_loss_to_BE
+        stop_loss := entry_price
+        stop_loss_to_be := true
+
+    // Close all trades at end of day (16:00)
+    if hour(time) == 16 and minute(time) == 00
+        strategy.close_all(comment="EOD Close @ " + str.tostring(close))
+        stop_loss_to_be := false
+        daily_losses := 0
+        order_placed := false
+        exit_order_placed := false
+        bars_since_order := na
+
+// // Close all trades on Friday at 15:45
+// if strategy.opentrades and (dayofweek(time) == dayofweek.friday) and (hour(time) == 15) and (minute(time) == 45)
+//     strategy.close_all(comment="Friday Close @ " + str.tostring(close))
+//     stop_loss_to_be := false
+//     daily_losses := 0
+//     order_placed := false
+//     exit_order_placed := false
+//     bars_since_order := na
