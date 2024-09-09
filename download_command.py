@@ -32,10 +32,10 @@ def download_command_file(bucket_name, source_blob_name, destination_file_name, 
         print(f"Failed to download or move the file: {e}")
 
 if __name__ == "__main__":
-    bucket_name = "trading-webhook-bucket"  # Replace with your actual bucket name
-    source_blob_name = "command.txt"  # The command file name, e.g., command.txt
-    destination_file_name = r"C:\Users\benmi\AppData\Roaming\MetaQuotes\Terminal\3AFFD4412460AA66B16CEA957D962993\MQL4\Files\command.txt"  # Use raw string
-    additional_folder = r"C:\Users\benmi\AppData\Roaming\MetaQuotes\Terminal\2C68BEE3A904BDCEE3EEF5A5A77EC162\MQL4\Files"  # Additional folder
+    bucket_name = "******-******-******"  # Replace with your actual bucket name
+    source_blob_name = "******.txt"  # The command file name, e.g., command.txt
+    destination_file_name = r"C:\*****\******\AppData\Roaming\MetaQuotes\Terminal\3AFFD4412460AA66B16CEA957D962993\MQL4\Files\command.txt"  # Use raw string
+    additional_folder = r"C:\*****\*****\AppData\Roaming\MetaQuotes\Terminal\2C68BEE3A904BDCEE3EEF5A5A77EC162\MQL4\Files"  # Additional folder
 
     while True:
         try:
